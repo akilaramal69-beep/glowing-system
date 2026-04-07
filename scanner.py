@@ -2,13 +2,51 @@ import asyncio
 import json
 import logging
 import websockets
-from config import WSS_ENDPOINT, RAYDIUM_LP_V4, PUMP_FUN_PROGRAM
+from solana.rpc.async_api import AsyncClient
+from config import WSS_ENDPOINT, RAYDIUM_LP_V4, PUMP_FUN_PROGRAM, RPC_ENDPOINT
+from solders.pubkey import Pubkey
 
 logger = logging.getLogger(__name__)
 
 class NewPoolScanner:
     def __init__(self, callback):
         self.callback = callback
+        self.rpc = AsyncClient(RPC_ENDPOINT)
+
+    async def extract_mint_from_tx(self, signature: str, dex: str):
+        try:
+            # Fetch transaction details
+            tx_data = await self.rpc.get_transaction(
+                signature, 
+                max_supported_transaction_version=0,
+                encoding="json"
+            )
+            if not tx_data or not tx_data.value:
+                return None
+            
+            # Simple parsing logic for DEX launches
+            # In production, use high-speed IDL-based parsing
+            accounts = tx_data.value.transaction.transaction.message.account_keys
+            
+            if dex == "Pump.fun":
+                # Pump.fun 'create' instruction: Mint is usually one of the first few new accounts
+                # For simplicity, we scan for accounts that are not common programs
+                # Real sniper: Parse instruction data to find the specific Mint account
+                for acc in accounts:
+                    acc_str = str(acc)
+                    if len(acc_str) > 30 and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM]:
+                        return acc_str
+            else:
+                # Raydium: Scan for the token that isn't WSOL
+                wsol = "So11111111111111111111111111111111111111112"
+                for acc in accounts:
+                    acc_str = str(acc)
+                    if len(acc_str) > 30 and acc_str != wsol and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM]:
+                        return acc_str
+            return None
+        except Exception as e:
+            logger.error(f"Error extracting mint from {signature}: {e}")
+            return None
 
     async def start_listening(self):
         logger.info("Starting Multi-DEX Scanner (Raydium + Pump.fun)...")
@@ -38,15 +76,19 @@ class NewPoolScanner:
                         logs = str(result["value"]["logs"])
                         signature = result["value"]["signature"]
                         
-                        # Raydium New Pool
+                        dex = None
                         if "initialize2" in logs:
-                            logger.info(f"New Raydium Pool: {signature}")
-                            await self.callback("ABC...123", signature, dex="Raydium")
-                        
-                        # Pump.fun New Token
+                            dex = "Raydium"
                         elif "Create" in logs:
-                            logger.info(f"New Pump.fun Launch: {signature}")
-                            await self.callback("XYZ...789", signature, dex="Pump.fun")
+                            dex = "Pump.fun"
+                        
+                        if dex:
+                            logger.info(f"New {dex} detected! Signature: {signature}")
+                            mint = await self.extract_mint_from_tx(signature, dex)
+                            if mint:
+                                await self.callback(mint, signature, dex=dex)
+                            else:
+                                logger.warning(f"Could not extract mint for {signature}")
                             
                 except websockets.ConnectionClosed:
                     logger.warning("Scanner WebSocket closed. Reconnecting...")
