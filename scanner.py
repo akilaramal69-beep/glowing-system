@@ -15,37 +15,59 @@ class NewPoolScanner:
         self.rpc = AsyncClient(RPC_ENDPOINT)
 
     async def extract_mint_from_tx(self, signature_str: str, dex: str):
-        try:
-            signature = Signature.from_string(signature_str)
-            # Fetch transaction details
-            tx_data = await self.rpc.get_transaction(
-                signature, 
-                max_supported_transaction_version=0,
-                encoding="json"
-            )
-            if not tx_data or not tx_data.value:
+        for attempt in range(3):
+            try:
+                signature = Signature.from_string(signature_str)
+                tx_data = await self.rpc.get_transaction(
+                    signature, 
+                    max_supported_transaction_version=0,
+                    encoding="json"
+                )
+                
+                if not tx_data or not tx_data.value:
+                    logger.warning(f"Attempt {attempt+1}: TX {signature_str} not found yet. Retrying...")
+                    await asyncio.sleep(1)
+                    continue
+                
+                # Instruction-level parsing (User recommended approach)
+                message = tx_data.value.transaction.transaction.message
+                instructions = message.instructions
+                accounts = message.account_keys
+                
+                if dex == "Pump.fun":
+                    # In Pump.fun 'create' instruction, Account 0 is usually the Mint
+                    for inst in instructions:
+                        program_id = str(accounts[inst.program_id_index])
+                        if program_id == PUMP_FUN_PROGRAM:
+                            # The first account in 'create' instruction is the Mint
+                            mint_index = inst.accounts[0]
+                            mint_address = str(accounts[mint_index])
+                            logger.info(f"Successfully extracted Pump.fun Mint: {mint_address}")
+                            return (mint_address, tx_data)
+                else:
+                    # Raydium 'initialize2' check
+                    for inst in instructions:
+                        program_id = str(accounts[inst.program_id_index])
+                        if program_id == RAYDIUM_LP_V4:
+                            for acc_idx in inst.accounts:
+                                acc_str = str(accounts[acc_idx])
+                                if len(acc_str) > 30 and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM]:
+                                    if acc_str != "So11111111111111111111111111111111111111112":
+                                        return (acc_str, tx_data)
+                
+                # Final Fallback to metadata
+                meta = tx_data.value.transaction.meta
+                if meta and hasattr(meta, 'post_token_balances') and meta.post_token_balances:
+                    for balance in meta.post_token_balances:
+                        mint = str(balance.mint)
+                        if mint not in ["So11111111111111111111111111111111111111112"]:
+                            return (mint, tx_data)
+                
                 return None
-            
-            # 2. Extract Mint from Metadata (Most reliable way)
-            meta = tx_data.value.transaction.meta
-            if meta and meta.post_token_balances:
-                # The first token balance in a creation tx is usually the new mint
-                for balance in meta.post_token_balances:
-                    mint = str(balance.mint)
-                    # Ignore WSOL and other common tokens
-                    if mint not in ["So11111111111111111111111111111111111111112"]:
-                        return mint
-            
-            # Fallback to account keys if metadata parsing fails
-            accounts = tx_data.value.transaction.transaction.message.account_keys
-            for acc in accounts:
-                acc_str = str(acc)
-                if len(acc_str) > 30 and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM, signature_str]:
-                    return acc_str
-            return None
-        except Exception as e:
-            logger.error(f"Error extracting mint from {signature}: {e}")
-            return None
+            except Exception as e:
+                logger.error(f"Error extracting mint (attempt {attempt+1}): {e}")
+                await asyncio.sleep(1)
+        return None
 
     async def start_listening(self):
         logger.info("Starting Multi-DEX Scanner (Raydium + Pump.fun)...")

@@ -44,4 +44,5 @@ SIMULATE_SELL = os.getenv("SIMULATE_SELL", "True").lower() == "true"
 # Algo Sniper Thresholds
 MIN_LIQUIDITY_SOL = float(os.getenv("MIN_LIQUIDITY_SOL", "10"))
 MAX_TOP_HOLDERS_PERCENT = float(os.getenv("MAX_TOP_HOLDERS_PERCENT", "30"))
+MAX_DEV_BUY_PERCENT = float(os.getenv("MAX_DEV_BUY_PERCENT", "10"))
 MIN_SCORE_TO_BUY = int(os.getenv("MIN_SCORE_TO_BUY", "70"))
