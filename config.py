@@ -11,6 +11,7 @@ WSS_ENDPOINT = os.getenv("WSS_ENDPOINT", "wss://api.mainnet-beta.solana.com")
 # DEX Programs
 RAYDIUM_LP_V4 = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
 PUMP_FUN_PROGRAM = "6EF8rrecthJ5Dwk84S5aB4x7YF9wYc6iV6h51zJ8U6S"
+PRIORITY_FEE_LAMPORTS = int(os.getenv("PRIORITY_FEE_LAMPORTS", "100000"))
 
 # Bot Operation Mode
 BOT_MODE = os.getenv("BOT_MODE", "COPY_TRADE").upper() # COPY_TRADE or ALGO_SNIPER

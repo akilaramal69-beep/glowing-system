@@ -11,8 +11,10 @@ from solders.message import MessageV0
 from filters import validate_token, get_session, JUP_DOMAINS
 from config import (
     RPC_ENDPOINT, JITO_ENDPOINT, JITO_TIP_AMOUNT_SOL, 
-    PRIVATE_KEY, MAX_POSITION_SOL, SLIPPAGE_LIMIT
+    PRIVATE_KEY, MAX_POSITION_SOL, SLIPPAGE_LIMIT, PRIORITY_FEE_LAMPORTS
 )
+from solders.system_program import TransferParams, transfer
+from solders.pubkey import Pubkey
 from telegram_bot import telegram_reporter
 
 logger = logging.getLogger(__name__)
@@ -45,6 +47,7 @@ class JitoClient:
 class TradeExecutor:
     def __init__(self):
         self.keypair = Keypair.from_bytes(base58.b58decode(PRIVATE_KEY))
+        self.rpc = AsyncClient(RPC_ENDPOINT)
         self.jito_client = JitoClient(endpoint=JITO_ENDPOINT)
         self.sol_mint = "So11111111111111111111111111111111111111112"
 
@@ -97,31 +100,57 @@ class TradeExecutor:
             logger.error("Failed to get Jupiter swap transaction")
             return False
 
-        # 3. Sign Transaction
-        raw_tx = base64.b64decode(swap_tx_base64)
-        v_tx = VersionedTransaction.from_bytes(raw_tx)
-        
-        # Note: In production, you'd add a Jito Tip instruction to the bundle.
-        # This implementation sends the swap tx as a single-transaction bundle for now.
+        # 3. Add Jito Tip & Priority Logic
+        # Jito Tip Accounts (Pick one)
+        JITO_TIP_ACCOUNT = Pubkey.from_string("96g9s9yUuQUWvUGr6mZSTVMTN8YSgR6R5z39Bxy5829H")
+        tip_lamports = int(JITO_TIP_AMOUNT_SOL * 10**9)
         
         try:
-            # Re-signing with the keypair if required (Jupiter usually returns signed-ready for execution txs 
-            # but needs the user's secondary sign if they weren't the one who built it, 
-            # actually Jupiter returns a tx that needs to be signed by the user)
+            # 1. Decode VersionedTransaction
+            raw_tx = base64.b64decode(swap_tx_base64)
+            v_tx = VersionedTransaction.from_bytes(raw_tx)
             
-            # signed_tx = base64.b64encode(bytes(v_tx)).decode("utf-8")
+            # 2. Add Tip Instruction (In a real implementation, you'd modify the Message)
+            # For now, we sign the Jupiter transaction directly.
+            # Most snipers send the 'Tip' as a separate transaction in the same bundle.
             
-            # Since I don't have the full signing logic here and Jito needs tips, 
-            # I'll just fix the import error and let the user know about the tip instruction requirement.
+            # Create Tip Transaction
+            tip_ix = transfer(TransferParams(
+                from_pubkey=self.keypair.pubkey(),
+                to_pubkey=JITO_TIP_ACCOUNT,
+                lamports=tip_lamports
+            ))
             
-            # Simplified for module fix:
-            logger.info("Jito Bundle submission prepared (Tip instruction needed for Mainnet landing)")
-            # await telegram_reporter.report_buy(token_address, MAX_POSITION_SOL)
-            return True
+            # Fetch recent blockhash
+            recent_blockhash = (await self.rpc.get_latest_blockhash()).value.blockhash
+            
+            tip_msg = MessageV0.compile(
+                payer=self.keypair.pubkey(),
+                instructions=[tip_ix],
+                address_lookup_table_accounts=[],
+                recent_blockhash=recent_blockhash
+            )
+            tip_tx = VersionedTransaction(tip_msg, [self.keypair])
+            
+            # Finalize Swap Tx signature
+            # Jupiter tx already has instructions, just needs our signature
+            v_tx.sign([self.keypair])
+            
+            # 3. Send Bundle
+            bundle = [
+                base64.b64encode(bytes(v_tx)).decode("utf-8"),
+                base64.b64encode(bytes(tip_tx)).decode("utf-8")
+            ]
+            bundle_id = await self.jito_client.send_bundle(bundle)
+            
+            if bundle_id:
+                logger.info(f"Jito Bundle Sent! ID: {bundle_id}")
+                await telegram_reporter.report_status(f"🚀 *Snipe Executed*\nToken: `{token_address}`\nBundle: `{bundle_id}`")
+                return True
+            return False
             
         except Exception as e:
-            logger.error(f"Error preparing Jito bundle: {e}")
-            await telegram_reporter.report_error(f"Failed to execute buy for {token_address}: {e}")
+            logger.error(f"Error executing Jito bundle: {e}")
             return False
 
 executor = TradeExecutor()

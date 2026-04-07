@@ -7,20 +7,17 @@ logger = logging.getLogger(__name__)
 async def get_dev_buy_amount(tx_data, token_mint):
     if not tx_data: return 0
     try:
-        # Check post-token-balances for the first account (the creator)
         meta = tx_data.value.transaction.meta
         if meta and meta.post_token_balances:
-            # We assume the creator is account 0 in the instruction
-            # and they have a balance in the new token mint
             for balance in meta.post_token_balances:
                 if str(balance.mint) == token_mint:
-                    # Simplified: check the amount as a percentage of total supply
-                    # Total supply is usually 1,000,000,000 (1B) for memes
+                    # Check if owner is a dev (usually account 0 in a create tx)
+                    # For simplicity, we just check the balance amount
                     amount = float(balance.ui_token_amount.ui_amount or 0)
                     percent = (amount / 1_000_000_000) * 100
                     return percent
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Dev buy check failed: {e}")
     return 0
 
 async def score_token(token_mint: str, signature: str, dex: str = "Raydium", tx_data: any = None):

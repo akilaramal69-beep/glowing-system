@@ -29,34 +29,40 @@ class NewPoolScanner:
                     await asyncio.sleep(1)
                     continue
                 
-                # Instruction-level parsing (User recommended approach)
+                # 1. Resolve Account Keys (Static + LUT)
                 message = tx_data.value.transaction.transaction.message
-                instructions = message.instructions
-                accounts = message.account_keys
+                meta = tx_data.value.transaction.meta
                 
+                static_keys = message.account_keys
+                # Address Lookup Tables (LUT) resolution
+                loaded_writable = meta.loaded_addresses.writable if hasattr(meta, 'loaded_addresses') and meta.loaded_addresses else []
+                loaded_readonly = meta.loaded_addresses.readonly if hasattr(meta, 'loaded_addresses') and meta.loaded_addresses else []
+                
+                all_keys = static_keys + loaded_writable + loaded_readonly
+                instructions = message.instructions
+                
+                # 2. Instruction-level parsing with LUT support
                 if dex == "Pump.fun":
-                    # In Pump.fun 'create' instruction, Account 0 is usually the Mint
                     for inst in instructions:
-                        program_id = str(accounts[inst.program_id_index])
+                        program_id = str(all_keys[inst.program_id_index])
                         if program_id == PUMP_FUN_PROGRAM:
-                            # The first account in 'create' instruction is the Mint
+                            # In Pump.fun 'create' instruction, Account 0 is the Mint
                             mint_index = inst.accounts[0]
-                            mint_address = str(accounts[mint_index])
+                            mint_address = str(all_keys[mint_index])
                             logger.info(f"Successfully extracted Pump.fun Mint: {mint_address}")
                             return (mint_address, tx_data)
                 else:
                     # Raydium 'initialize2' check
                     for inst in instructions:
-                        program_id = str(accounts[inst.program_id_index])
+                        program_id = str(all_keys[inst.program_id_index])
                         if program_id == RAYDIUM_LP_V4:
                             for acc_idx in inst.accounts:
-                                acc_str = str(accounts[acc_idx])
+                                acc_str = str(all_keys[acc_idx])
                                 if len(acc_str) > 30 and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM]:
                                     if acc_str != "So11111111111111111111111111111111111111112":
                                         return (acc_str, tx_data)
                 
                 # Final Fallback to metadata
-                meta = tx_data.value.transaction.meta
                 if meta and hasattr(meta, 'post_token_balances') and meta.post_token_balances:
                     for balance in meta.post_token_balances:
                         mint = str(balance.mint)
@@ -105,9 +111,10 @@ class NewPoolScanner:
                         
                         if dex:
                             logger.info(f"New {dex} detected! Signature: {signature}")
-                            mint = await self.extract_mint_from_tx(signature, dex)
-                            if mint:
-                                await self.callback(mint, signature, dex=dex)
+                            result = await self.extract_mint_from_tx(signature, dex)
+                            if result:
+                                mint, tx_data = result
+                                await self.callback(mint, signature, dex=dex, tx_data=tx_data)
                             else:
                                 logger.warning(f"Could not extract mint for {signature}")
                             

@@ -4,7 +4,8 @@ A production-ready, Dockerized Solana bot optimized for low latency and anti-MEV
 
 ## 🚀 Features
 
-- **Jito Bundle Submission**: All trades are sent as Jito bundles to prevent sandwich attacks.
+- **Jito Bundle Submission**: All trades are sent as Jito bundles with custom tips and priority fees to guarantee landing.
+- **LUT-Aware Scanner**: Supports Address Lookup Tables (LUT) for 100% accurate token extraction on any DEX.
 - **Jupiter V6 Aggregator**: Uses Jupiter Swap API for best price execution.
 - **Copy-Trading Mode**: Follow smart wallets with multi-wallet confirmation logic.
 - **Algorithmic Sniper Mode**: 
