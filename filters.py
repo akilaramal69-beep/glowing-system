@@ -1,6 +1,8 @@
 import aiohttp
 import asyncio
 import logging
+import json
+import socket
 from solana.rpc.async_api import AsyncClient
 from solders.pubkey import Pubkey
 from config import RPC_ENDPOINT, MIN_MARKET_CAP_USD, CHECK_FREEZE_AUTHORITY, SIMULATE_SELL
@@ -9,6 +11,7 @@ logger = logging.getLogger(__name__)
 
 # Global session to be initialized in main.py
 _session = None
+_dns_cache = {}
 JUP_DOMAINS = ["quote-api.jup.ag", "api.jup.ag", "jup.ag", "quote.jup.ag"]
 WHITELISTED_TOKENS = [
     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
@@ -16,21 +19,61 @@ WHITELISTED_TOKENS = [
     "So11111111111111111111111111111111111111112"  # WSOL
 ]
 
-import socket # Add this import at the top
+async def resolve_doh(hostname):
+    """Resolve a hostname using Cloudflare DNS-over-HTTPS to bypass local DNS issues."""
+    if hostname in _dns_cache: return _dns_cache[hostname]
+    try:
+        async with aiohttp.ClientSession() as session:
+            url = f"https://cloudflare-dns.com/dns-query?name={hostname}&type=A"
+            headers = {"accept": "application/dns-json"}
+            async with session.get(url, headers=headers, timeout=5) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    for answer in data.get("Answer", []):
+                        if answer.get("type") == 1: # A record
+                            ip = answer["data"]
+                            _dns_cache[hostname] = ip
+                            return ip
+    except Exception as e:
+        logger.error(f"DoH resolution failed for {hostname}: {e}")
+    return None
+
+async def resilient_get(url: str):
+    """GET request with automatic IP-fallback via DoH for Jupiter/Koyeb stability."""
+    session = await get_session()
+    from urllib.parse import urlparse
+    parsed = urlparse(url)
+    hostname = parsed.netloc
+    
+    headers = {"User-Agent": "SolanaBot/1.0", "Accept": "application/json"}
+    
+    # 1. Standard Attempt
+    try:
+        async with session.get(url, headers=headers, timeout=5) as resp:
+            if resp.status == 200: return await resp.json()
+    except Exception:
+        pass
+    
+    # 2. DoH Fallback (Cloudflare 1.1.1.1 API)
+    ip = await resolve_doh(hostname)
+    if ip:
+        logger.info(f"DNS FAIL: Trying DoH Fallback {hostname} -> {ip}")
+        direct_url = url.replace(hostname, ip)
+        direct_headers = headers.copy()
+        direct_headers["Host"] = hostname
+        try:
+            async with aiohttp.ClientSession(connector=aiohttp.TCPConnector(ssl=False)) as direct_session:
+                async with direct_session.get(direct_url, headers=direct_headers, timeout=5) as resp:
+                    if resp.status == 200: return await resp.json()
+        except Exception as e:
+            logger.error(f"IP Fallback failed: {e}")
+    return None
 
 async def get_session():
     global _session
     if _session is None or _session.closed:
-        # 1. Force IPv4 (many Koyeb/Docker issues are due to IPv6 preference)
-        # 2. Disable DNS Cache
-        # 3. Use dedicated nameservers
-        resolver = aiohttp.AsyncResolver(nameservers=["1.1.1.1", "8.8.8.8", "9.9.9.9"])
-        connector = aiohttp.TCPConnector(
-            resolver=resolver, 
-            family=socket.AF_INET, 
-            use_dns_cache=False,
-            ttl_dns_cache=0
-        )
+        resolver = aiohttp.AsyncResolver(nameservers=["1.1.1.1", "8.8.8.8"])
+        connector = aiohttp.TCPConnector(resolver=resolver, family=socket.AF_INET, use_dns_cache=False)
         _session = aiohttp.ClientSession(connector=connector)
     return _session
 
@@ -68,17 +111,9 @@ async def simulate_sell(token_address: str, wallet_address: str):
     
     for domain in JUP_DOMAINS:
         url = f"https://{domain}/v6/quote?inputMint={token_address}&outputMint=So11111111111111111111111111111111111111112&amount=100000000&slippageBps=50"
-        for attempt in range(2):
-            try:
-                async with session.get(url, timeout=5) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        return "outAmount" in data
-                    elif response.status == 429:
-                        await asyncio.sleep(1)
-            except (aiohttp.ClientConnectorError, asyncio.TimeoutError) as e:
-                logger.warning(f"Jupiter DNS/Connection error on {domain} (attempt {attempt+1}): {e}")
-                await asyncio.sleep(1)
+        data = await resilient_get(url)
+        if data and "outAmount" in data:
+            return True
     return False
 
 async def is_lp_burned(token_mint: str):

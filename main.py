@@ -36,7 +36,7 @@ async def handle_new_token(token_mint: str, signature: str, dex: str = "Raydium"
     # 3. Decision
     if await should_buy(score):
         logger.info(f"Score {score} >= {MIN_SCORE_TO_BUY}. Executing SNIPER BUY!")
-        success = await executor.execute_buy(token_mint)
+        success = await executor.execute_buy(token_mint, dex=dex)
         if success:
             state_manager.add_position(token_mint, 1.0, 0.5)
     else:
