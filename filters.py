@@ -16,11 +16,21 @@ WHITELISTED_TOKENS = [
     "So11111111111111111111111111111111111111112"  # WSOL
 ]
 
+import socket # Add this import at the top
+
 async def get_session():
     global _session
     if _session is None or _session.closed:
-        # Hardcode DNS resolver to bypass local resolution issues
-        connector = aiohttp.TCPConnector(resolver=aiohttp.AsyncResolver(nameservers=["8.8.8.8", "1.1.1.1"]))
+        # 1. Force IPv4 (many Koyeb/Docker issues are due to IPv6 preference)
+        # 2. Disable DNS Cache
+        # 3. Use dedicated nameservers
+        resolver = aiohttp.AsyncResolver(nameservers=["1.1.1.1", "8.8.8.8", "9.9.9.9"])
+        connector = aiohttp.TCPConnector(
+            resolver=resolver, 
+            family=socket.AF_INET, 
+            use_dns_cache=False,
+            ttl_dns_cache=0
+        )
         _session = aiohttp.ClientSession(connector=connector)
     return _session
 
@@ -48,6 +58,12 @@ async def simulate_sell(token_address: str, wallet_address: str):
     if token_address in WHITELISTED_TOKENS or not SIMULATE_SELL:
         return True
     
+    # Optional: If token name ends in 'pump', we can assume it's Pump.fun
+    # and skip Jupiter simulation as it will always fail there initially.
+    if token_address.lower().endswith("pump"):
+        logger.info(f"Skipping sell simulation for Pump.fun token {token_address}")
+        return True
+
     session = await get_session()
     
     for domain in JUP_DOMAINS:

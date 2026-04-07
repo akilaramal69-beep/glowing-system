@@ -76,51 +76,45 @@ class NewPoolScanner:
         return None
 
     async def start_listening(self):
-        logger.info("Starting Multi-DEX Scanner (Raydium + Pump.fun)...")
-        
-        async with websockets.connect(WSS_ENDPOINT) as websocket:
-            # 1. Raydium Subscription
-            await websocket.send(json.dumps({
-                "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
-                "params": [{"mentions": [RAYDIUM_LP_V4]}, {"commitment": "confirmed"}]
-            }))
-            
-            # 2. Pump.fun Subscription
-            await websocket.send(json.dumps({
-                "jsonrpc": "2.0", "id": 2, "method": "logsSubscribe",
-                "params": [{"mentions": [PUMP_FUN_PROGRAM]}, {"commitment": "confirmed"}]
-            }))
-            
-            logger.info("Subscribed to Raydium and Pump.fun logs.")
+        while True:
+            try:
+                logger.info("Connecting to DEX Multi-Scanner...")
+                async with websockets.connect(WSS_ENDPOINT, ping_interval=20, ping_timeout=20) as websocket:
+                    # 1. Subscriptions
+                    await websocket.send(json.dumps({
+                        "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
+                        "params": [{"mentions": [RAYDIUM_LP_V4]}, {"commitment": "confirmed"}]
+                    }))
+                    await websocket.send(json.dumps({
+                        "jsonrpc": "2.0", "id": 2, "method": "logsSubscribe",
+                        "params": [{"mentions": [PUMP_FUN_PROGRAM]}, {"commitment": "confirmed"}]
+                    }))
+                    logger.info("Subscribed to Raydium and Pump.fun logs.")
 
-            while True:
-                try:
-                    response = await websocket.recv()
-                    data = json.loads(response)
-                    
-                    if "params" in data:
-                        result = data["params"]["result"]
-                        logs = str(result["value"]["logs"])
-                        signature = result["value"]["signature"]
-                        
-                        dex = None
-                        if "initialize2" in logs:
-                            dex = "Raydium"
-                        elif "Create" in logs:
-                            dex = "Pump.fun"
-                        
-                        if dex:
-                            logger.info(f"New {dex} detected! Signature: {signature}")
-                            result = await self.extract_mint_from_tx(signature, dex)
-                            if result:
-                                mint, tx_data = result
-                                await self.callback(mint, signature, dex=dex, tx_data=tx_data)
-                            else:
-                                logger.warning(f"Could not extract mint for {signature}")
-                            
-                except websockets.ConnectionClosed:
-                    logger.warning("Scanner WebSocket closed. Reconnecting...")
-                    break
-                except Exception as e:
-                    logger.error(f"Error in scanner loop: {e}")
-                    continue
+                    while True:
+                        try:
+                            response = await websocket.recv()
+                            data = json.loads(response)
+                            # ... logic same as before but inside this nested loop
+                            if "params" in data:
+                                result = data["params"]["result"]
+                                logs = str(result["value"]["logs"])
+                                signature = result["value"]["signature"]
+                                dex = "Raydium" if "initialize2" in logs else ("Pump.fun" if "Create" in logs else None)
+                                
+                                if dex:
+                                    logger.info(f"New {dex} detected! Signature: {signature}")
+                                    res = await self.extract_mint_from_tx(signature, dex)
+                                    if res:
+                                        mint, tx_data = res
+                                        await self.callback(mint, signature, dex=dex, tx_data=tx_data)
+                        except websockets.ConnectionClosed:
+                            logger.warning("WebSocket lost. Re-establishing in 5s...")
+                            await asyncio.sleep(5)
+                            break
+                        except Exception as e:
+                            logger.error(f"Scanner sub-loop error: {e}")
+                            continue
+            except Exception as e:
+                logger.error(f"Scanner connection failed: {e}. Retrying in 10s...")
+                await asyncio.sleep(10)
