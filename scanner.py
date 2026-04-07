@@ -5,6 +5,7 @@ import websockets
 from solana.rpc.async_api import AsyncClient
 from config import WSS_ENDPOINT, RAYDIUM_LP_V4, PUMP_FUN_PROGRAM, RPC_ENDPOINT
 from solders.pubkey import Pubkey
+from solders.signature import Signature
 
 logger = logging.getLogger(__name__)
 
@@ -13,8 +14,9 @@ class NewPoolScanner:
         self.callback = callback
         self.rpc = AsyncClient(RPC_ENDPOINT)
 
-    async def extract_mint_from_tx(self, signature: str, dex: str):
+    async def extract_mint_from_tx(self, signature_str: str, dex: str):
         try:
+            signature = Signature.from_string(signature_str)
             # Fetch transaction details
             tx_data = await self.rpc.get_transaction(
                 signature, 
@@ -24,25 +26,22 @@ class NewPoolScanner:
             if not tx_data or not tx_data.value:
                 return None
             
-            # Simple parsing logic for DEX launches
-            # In production, use high-speed IDL-based parsing
-            accounts = tx_data.value.transaction.transaction.message.account_keys
+            # 2. Extract Mint from Metadata (Most reliable way)
+            meta = tx_data.value.transaction.meta
+            if meta and meta.post_token_balances:
+                # The first token balance in a creation tx is usually the new mint
+                for balance in meta.post_token_balances:
+                    mint = str(balance.mint)
+                    # Ignore WSOL and other common tokens
+                    if mint not in ["So11111111111111111111111111111111111111112"]:
+                        return mint
             
-            if dex == "Pump.fun":
-                # Pump.fun 'create' instruction: Mint is usually one of the first few new accounts
-                # For simplicity, we scan for accounts that are not common programs
-                # Real sniper: Parse instruction data to find the specific Mint account
-                for acc in accounts:
-                    acc_str = str(acc)
-                    if len(acc_str) > 30 and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM]:
-                        return acc_str
-            else:
-                # Raydium: Scan for the token that isn't WSOL
-                wsol = "So11111111111111111111111111111111111111112"
-                for acc in accounts:
-                    acc_str = str(acc)
-                    if len(acc_str) > 30 and acc_str != wsol and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM]:
-                        return acc_str
+            # Fallback to account keys if metadata parsing fails
+            accounts = tx_data.value.transaction.transaction.message.account_keys
+            for acc in accounts:
+                acc_str = str(acc)
+                if len(acc_str) > 30 and acc_str not in [RAYDIUM_LP_V4, PUMP_FUN_PROGRAM, signature_str]:
+                    return acc_str
             return None
         except Exception as e:
             logger.error(f"Error extracting mint from {signature}: {e}")
