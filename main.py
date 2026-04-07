@@ -18,15 +18,15 @@ from algo import score_token, should_buy
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
 logger = logging.getLogger(__name__)
 
-async def handle_new_token(token_mint: str, signature: str):
-    logger.info(f"Analyzing new token: {token_mint}")
+async def handle_new_token(token_mint: str, signature: str, dex: str = "Raydium"):
+    logger.info(f"Analyzing new {dex} token: {token_mint}")
     
     # 1. Score the token
-    score, reasons = await score_token(token_mint, signature)
+    score, reasons = await score_token(token_mint, signature, dex=dex)
     
     # 2. Telegram Alert for high potential tokens
     if score > 50:
-        await telegram_reporter.report_status(f"🔍 *New Token Scored*: `{score}/100`\nMint: `{token_mint}`\nReasons: {', '.join(reasons)}")
+        await telegram_reporter.report_status(f"🔍 *New {dex} Launch*: `{score}/100`\nMint: `{token_mint}`\nReasons: {', '.join(reasons)}")
 
     # 3. Decision
     if await should_buy(score):

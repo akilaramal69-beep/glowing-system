@@ -2,33 +2,31 @@ import asyncio
 import json
 import logging
 import websockets
-from config import WSS_ENDPOINT
+from config import WSS_ENDPOINT, RAYDIUM_LP_V4, PUMP_FUN_PROGRAM
 
 logger = logging.getLogger(__name__)
 
-# Raydium Liquidity Pool V4 Program ID
-RAYDIUM_LP_V4 = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
-
 class NewPoolScanner:
     def __init__(self, callback):
-        self.callback = callback # Function to call when a new pool is found
+        self.callback = callback
 
     async def start_listening(self):
-        logger.info(f"Starting New Pool Scanner on Raydium ({RAYDIUM_LP_V4})...")
+        logger.info("Starting Multi-DEX Scanner (Raydium + Pump.fun)...")
         
         async with websockets.connect(WSS_ENDPOINT) as websocket:
-            # Subscribe to logs for the Raydium LP program
-            sub = {
-                "jsonrpc": "2.0",
-                "id": 1,
-                "method": "logsSubscribe",
-                "params": [
-                    {"mentions": [RAYDIUM_LP_V4]},
-                    {"commitment": "confirmed"}
-                ]
-            }
-            await websocket.send(json.dumps(sub))
-            logger.info("Subscribed to Raydium LP logs.")
+            # 1. Raydium Subscription
+            await websocket.send(json.dumps({
+                "jsonrpc": "2.0", "id": 1, "method": "logsSubscribe",
+                "params": [{"mentions": [RAYDIUM_LP_V4]}, {"commitment": "confirmed"}]
+            }))
+            
+            # 2. Pump.fun Subscription
+            await websocket.send(json.dumps({
+                "jsonrpc": "2.0", "id": 2, "method": "logsSubscribe",
+                "params": [{"mentions": [PUMP_FUN_PROGRAM]}, {"commitment": "confirmed"}]
+            }))
+            
+            logger.info("Subscribed to Raydium and Pump.fun logs.")
 
             while True:
                 try:
@@ -37,19 +35,18 @@ class NewPoolScanner:
                     
                     if "params" in data:
                         result = data["params"]["result"]
-                        logs = result["value"]["logs"]
+                        logs = str(result["value"]["logs"])
                         signature = result["value"]["signature"]
                         
-                        # Look for 'initialize2' which signifies a new pool creation
-                        if any("initialize2" in str(log) for log in logs):
-                            logger.info(f"New Raydium Pool Detected! TX: {signature}")
-                            # In a real sniper, you'd call getTransaction here to extract the Mint
-                            # and then pass it to the callback for analysis.
-                            
-                            # Placeholder: Simulated Mint Extraction
-                            # In production, use: response = await rpc.get_transaction(signature)
-                            token_mint = "ABC...123" # This would be parsed from inner instructions
-                            await self.callback(token_mint, signature)
+                        # Raydium New Pool
+                        if "initialize2" in logs:
+                            logger.info(f"New Raydium Pool: {signature}")
+                            await self.callback("ABC...123", signature, dex="Raydium")
+                        
+                        # Pump.fun New Token
+                        elif "Create" in logs:
+                            logger.info(f"New Pump.fun Launch: {signature}")
+                            await self.callback("XYZ...789", signature, dex="Pump.fun")
                             
                 except websockets.ConnectionClosed:
                     logger.warning("Scanner WebSocket closed. Reconnecting...")

@@ -8,6 +8,10 @@ RPC_ENDPOINT = os.getenv("RPC_ENDPOINT", "https://api.mainnet-beta.solana.com")
 FALLBACK_RPC = os.getenv("FALLBACK_RPC", "https://api.mainnet-beta.solana.com")
 WSS_ENDPOINT = os.getenv("WSS_ENDPOINT", "wss://api.mainnet-beta.solana.com")
 
+# DEX Programs
+RAYDIUM_LP_V4 = "675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8"
+PUMP_FUN_PROGRAM = "6EF8rrecthJ5Dwk84S5aB4x7YF9wYc6iV6h51zJ8U6S"
+
 # Bot Operation Mode
 BOT_MODE = os.getenv("BOT_MODE", "COPY_TRADE").upper() # COPY_TRADE or ALGO_SNIPER
 

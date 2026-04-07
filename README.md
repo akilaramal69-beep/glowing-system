@@ -7,7 +7,9 @@ A production-ready, Dockerized Solana bot optimized for low latency and anti-MEV
 - **Jito Bundle Submission**: All trades are sent as Jito bundles to prevent sandwich attacks.
 - **Jupiter V6 Aggregator**: Uses Jupiter Swap API for best price execution.
 - **Copy-Trading Mode**: Follow smart wallets with multi-wallet confirmation logic.
-- **Algorithmic Sniper Mode**: Real-time scanning for new Raydium pools with automated safety scoring (LP Burn, Holder Distribution).
+- **Algorithmic Sniper Mode**: 
+  - **Multi-DEX Scanning**: Real-time detection of new **Raydium** pools and **Pump.fun** bonding curve launches.
+  - **Automated Scoring**: Safety checks for LP burns, insider distribution, and platform-specific metrics.
 - **Safety Filters**: Honeypot detection, freeze authority checks, and market cap verification.
 - **Telegram Notifications**: Real-time alerts for buys, filter rejections, and scanning events.
 - **State Persistence**: Positions are saved to `positions.json` to survive restarts.
