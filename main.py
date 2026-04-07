@@ -19,6 +19,11 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(me
 logger = logging.getLogger(__name__)
 
 async def handle_new_token(token_mint: str, signature: str, dex: str = "Raydium", tx_data: any = None):
+    # 0. Fast Filter for Stables
+    if token_mint in WHITELISTED_TOKENS:
+        logger.debug(f"Skipping whitelisted token: {token_mint}")
+        return
+
     logger.info(f"Analyzing new {dex} token: {token_mint}")
     
     # 1. Score the token

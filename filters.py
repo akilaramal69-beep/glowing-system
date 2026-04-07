@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 
 # Global session to be initialized in main.py
 _session = None
-JUP_DOMAINS = ["quote-api.jup.ag", "api.jup.ag"]
+JUP_DOMAINS = ["quote-api.jup.ag", "api.jup.ag", "jup.ag", "quote.jup.ag"]
 WHITELISTED_TOKENS = [
     "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", # USDC
     "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", # USDT
